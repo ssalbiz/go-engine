@@ -19,15 +19,6 @@ typedef struct BitBoard {
       && b[4] == p.b[4] && b[5] == p.b[5];
   }
   bool empty() { return b[0] && b[1] && b[2] && b[3] && b[4] && b[5]; }
-  unsigned int first_idx() {
-    unsigned int r = __builtin_ffsll(b[0]);
-    if (r) return r; r = __builtin_ffsll(b[1]);
-    if (r) return r+64; r = __builtin_ffsll(b[2]);
-    if (r) return r+128; r = __builtin_ffsll(b[3]);
-    if (r) return r+192; r = __builtin_ffsll(b[4]);
-    if (r) return r+256; r = __builtin_ffsll(b[5]);
-    if (r) return r+320; return r;
-  }
   bool testbit(int i) { return b[i/64] & (static_cast<uint64_t>(1) << (i%64)); }
   void setbit(int i) { b[i/64] |= (static_cast<uint64_t>(1) << (i%64)); }
   void clearbit(int i) { b[i/64] &= ~(static_cast<uint64_t>(1) << (i%64)); }
@@ -40,40 +31,35 @@ typedef struct BitBoard {
 // Disjoint set structure. Implements union-find w/rank + path compression.
 // Layout:
 //   1 unremovable head for all empty stones
-//   vector of white chains - chains live/die together, so removal from set is not an issue.
-//   vector of black chains - addition to set/membership is trivial.
+//   set of white chains - chains live/die together, so removal from set is not an issue.
+//   set of black chains - addition to set/membership is trivial.
 typedef struct Chain {
-  std::pair<int, int> pos;
   int rank;
-  Chain *parent;
-  Chain() : pos(-1, -1), rank(0), parent(NULL) {}
-  Chain(int x, int y) : pos(x, y), rank(0), parent(NULL) {}
-  Chain(const Chain& c) : pos(c.pos), rank(0), parent(NULL) {}
+  Chain* parent;
+  Chain() : rank(0), parent(NULL) {}
+  Chain(const Chain& c) : rank(0), parent(NULL) {}
+  bool Connected(Chain& c2) {
+    Chain *c1_root = Find(), *c2_root = c2.Find();
+    return (c1_root == c2_root && c1_root != NULL);
+  }
   // Union by rank.
   Chain* Union(Chain& c2) {
-    Chain* c1_root = this->Find();
+    Chain* c1_root = Find();
     Chain* c2_root = c2.Find();
-    // Already overlapping sets, no-op.
     if (c1_root == c2_root) return c1_root;
+    // Already overlapping sets, no-op.
     if (c1_root->rank < c2_root->rank) {
       c1_root->parent = c2_root;
       return c2_root;
-    } else if (c2_root->rank < c1_root->rank) {
-      c2_root->parent = c1_root;
-      return c1_root;
     } else {
       c2_root->parent = c1_root;
-      ++c2_root->rank;
       return c1_root;
     }
   }
   // Find w/ path compression.
   Chain* Find() {
-    Chain *ret = this->parent;
-    while (ret) {
-      this->parent = ret;
-      ret = ret->parent;
-    }
+    Chain *ret = parent;
+    while (ret) { parent = ret; ret = ret->parent; }
     return this;
   }
 } Chain;
@@ -91,15 +77,15 @@ typedef struct BoardState {
 
 typedef struct GameBoard {
   BoardState state;
-  std::vector<Chain*> w_chains;
-  std::vector<Chain*> b_chains;
+  std::set<Chain*> w_chains;
+  std::set<Chain*> b_chains;
   Chain empty;
   Chain allstones[BOARD][BOARD];
   GameBoard(BoardState start) {
     state = start;
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
-        allstones[i][j] = Chain(i, j);
+        allstones[i][j].rank = j*BOARD+i;
         empty.Union(allstones[i][j]);
       }
     }
@@ -112,7 +98,6 @@ int liberties(int x, int y, BitBoard p1, BitBoard p2) {
   visited.clear();
   int start_node = y*BOARD+x;
   std::queue<int> nodes;
-  std::vector<int> chain;
   nodes.push(start_node);
   int liberties = 0;
   while(!nodes.empty()) {
