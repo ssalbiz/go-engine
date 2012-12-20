@@ -5,7 +5,11 @@
 #include<stdint.h>
 
 #define BOARD 19
+#define EMPTY 0
+#define BLACK 1
+#define WHITE 2
 #define FOREVER for(;;)
+#define TO_INDEX(x,y) ((y)*BOARD+(x))
 typedef struct BitBoard {
   uint64_t b[6];
   BitBoard() { this->clear(); }
@@ -34,34 +38,9 @@ typedef struct BitBoard {
 //   set of white chains - chains live/die together, so removal from set is not an issue.
 //   set of black chains - addition to set/membership is trivial.
 typedef struct Chain {
-  int rank;
-  Chain* parent;
-  Chain() : rank(0), parent(NULL) {}
-  Chain(const Chain& c) : rank(0), parent(NULL) {}
-  bool Connected(Chain& c2) {
-    Chain *c1_root = Find(), *c2_root = c2.Find();
-    return (c1_root == c2_root && c1_root != NULL);
-  }
-  // Union by rank.
-  Chain* Union(Chain& c2) {
-    Chain* c1_root = Find();
-    Chain* c2_root = c2.Find();
-    if (c1_root == c2_root) return c1_root;
-    // Already overlapping sets, no-op.
-    if (c1_root->rank < c2_root->rank) {
-      c1_root->parent = c2_root;
-      return c2_root;
-    } else {
-      c2_root->parent = c1_root;
-      return c1_root;
-    }
-  }
-  // Find w/ path compression.
-  Chain* Find() {
-    Chain *ret = parent;
-    while (ret) { parent = ret; ret = ret->parent; }
-    return this;
-  }
+  int parent;
+  int colour;
+  Chain() : rank(0), parent(-1) {}
 } Chain;
 
 typedef struct BoardState {
@@ -79,16 +58,54 @@ typedef struct GameBoard {
   BoardState state;
   std::set<Chain*> w_chains;
   std::set<Chain*> b_chains;
-  Chain empty;
-  Chain allstones[BOARD][BOARD];
+  Chain allstones[BOARD*BOARD];
   GameBoard(BoardState start) {
     state = start;
-    for (int i = 0; i < BOARD; ++i) {
-      for (int j = 0; j < BOARD; ++j) {
-        allstones[i][j].rank = j*BOARD+i;
-        empty.Union(allstones[i][j]);
+    for (int i = 0; i < BOARD*BOARD; ++i) {
+      allstones[i].parent = -1;
+      allstones[i].colour = EMPTY;
+    }
+  }
+  int Find(int pos) {
+    if allstones[pos].parent == pos || allstones[pos].parent == -1
+      return pos
+    else
+      return (allstones[pos].parent = Find(allstones[pos].parent));
+  }
+  void Remove(int pos) {
+    int p = Find(pos); if (p != -1) allstones[p].parent = -1;
+  }
+  int Connected(int pos1, int pos2) {
+    int p = Find(pos1);
+    return p == Find(pos2) && p != -1;
+  }
+  int Empty(int pos1) {
+    return Find(pos1) == -1;
+  }
+  int Union(int pos1, int pos2) {
+    int p1 = Find(pos1);
+    int p2 = Find(pos2);
+    if (p1 == p2) return p1;
+    if (allstones[p1].parent < allstones[p2].parent) { allstones[p2].parent = p1; return p1; }
+    else { allstones[p1].parent = p2; return p2; }
+  }
+  int Add(int x, int y, int colour) {
+    if (allstones[pos1].colour) { return 0; } // error, occupied cell
+    // merge with chains on NSEW adjacencies
+    if (x > 0) {
+      int pos = TO_INDEX(x,y);
+      if (allstones[TO_INDEX(x-1,y)].colour == colour) {
+        Union(pos, TO_INDEX(x-1,y));
+      } (allstones[TO_INDEX(x-1,y)].colour != EMPTY) {
+
       }
     }
+    if (x < BOARD-1 && allstones[TO_INDEX(x+1,y)].colour == colour)
+      Union(TO_INDEX(x,y), TO_INDEX(x+1,y));
+    if (y > 0 && allstones[TO_INDEX(x,y-1)].colour == colour)
+      Union(TO_INDEX(x,y), TO_INDEX(x,y-1));
+    if (y < BOARD-1 && allstones[TO_INDEX(x,y+1)].colour == colour)
+      Union(TO_INDEX(x,y), TO_INDEX(x,y+1));
   }
 } GameBoard;
 
@@ -199,9 +216,9 @@ void ANSI_cursor_down(int x) { printf("%c[%dB", ESC, x); }
 void ANSI_cursor_move(int r, int c) { printf("%c[%d;%dH", ESC, r, c); }
 void ANSI_clear_screen(void) { printf("%c[2J", ESC); }
 
-#define EMPTY  43
-#define WHITE 103
-#define BLACK  30
+#define EMPTY_AA  43
+#define WHITE_AA 103
+#define BLACK_AA  30
 void print_state(BoardState& b) {
   //*
   ANSI_clear_screen();
@@ -217,9 +234,9 @@ void print_state(BoardState& b) {
     printf("%2d ", BOARD-i);
     // */
     for (int j = 0; j < BOARD; ++j) {
-      int colour = b.white.testboard(j, BOARD-i-1) ? WHITE :
-        b.black.testboard(j, BOARD-i-1) ? BLACK : EMPTY;
-      if (colour != EMPTY) {
+      int colour = b.white.testboard(j, BOARD-i-1) ? WHITE_AA :
+        b.black.testboard(j, BOARD-i-1) ? BLACK_AA : EMPTY_AA;
+      if (colour != EMPTY_AA) {
         /*
         if (colour == BLACK) {
           fprintf(stderr, "BLACK: %d %d\n", j, BOARD-i-1);
