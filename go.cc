@@ -11,30 +11,8 @@
 #define WHITE 2
 #define FOREVER for(;;)
 #define TO_INDEX(x,y) ((y)*BOARD+(x))
-#define OTHER_COLOUR(x) (x ? x == 1 ? 2 : 1 : 0)
+#define OTHER_COLOUR(x) (x != EMPTY ? x == BLACK ? WHITE : BLACK : EMPTY)
 uint64_t zobrist[BOARD*BOARD][2];
-
-typedef struct BitBoard {
-  uint64_t b[6];
-  BitBoard() { this->clear(); }
-  BitBoard(const BitBoard& p) {
-    b[0] = p.b[0]; b[1] = p.b[1]; b[2] = p.b[2];
-    b[3] = p.b[3]; b[4] = p.b[4]; b[5] = p.b[5];
-  }
-  uint64_t& operator[](const int i) { return b[i]; }
-  bool operator==(const BitBoard& p) const {
-    return b[0] == p.b[0] && b[1] == p.b[1] && b[2] == p.b[2] && b[3] == p.b[3]
-      && b[4] == p.b[4] && b[5] == p.b[5];
-  }
-  bool empty() { return b[0] && b[1] && b[2] && b[3] && b[4] && b[5]; }
-  bool testbit(int i) { return b[i/64] & (static_cast<uint64_t>(1) << (i%64)); }
-  void setbit(int i) { b[i/64] |= (static_cast<uint64_t>(1) << (i%64)); }
-  void clearbit(int i) { b[i/64] &= ~(static_cast<uint64_t>(1) << (i%64)); }
-  void clear() { b[0] = 0; b[1] = 0; b[2] = 0; b[3] = 0; b[4] = 0; b[5] = 0; }
-  bool testboard(int x, int y) { return this->testbit(y*BOARD + x); }
-  void setboard(int x, int y) { this->setbit(y*BOARD + x); }
-  void clearboard(int x, int y) { this->clearbit(y*BOARD + x); }
-} BitBoard;
 
 // Disjoint set structure. Implements union-find w/rank + path compression.
 // Layout:
@@ -47,32 +25,19 @@ typedef struct Chain {
   int dirty; // mark when we place a stone here, we need to flood fill to reset the liberty count.
   std::set<int> liberties; // empty adjacents
   std::set<int> contacts; // adjacents of the opposite colour
-  Chain() : colour(EMPTY), parent(-1) {}
+  Chain() : colour(EMPTY), parent(-1), dirty(0) {}
 } Chain;
 
-typedef struct BoardState {
-  BitBoard white;
-  BitBoard black;
-  BoardState() { white.clear(); black.clear(); }
-  BoardState(const BoardState& g) { white = g.white; black = g.black; }
-  bool operator==(const BoardState& p) const {
-    return white == p.white && black == p.black;
-  }
-  bool operator<(const BoardState& p) const { return true; }
-} BoardState;
-
-inline static int east_of(int x, int y) { return x-1 >= 0 ? y*BOARD+x-1 : -1; }
+inline static int east_of(int x, int y) { return (x-1) >= 0 ? y*BOARD+x-1 : -1; }
 inline static int west_of(int x, int y) { return x+1 < BOARD ? y*BOARD+x+1 : -1; }
 inline static int north_of(int x, int y) { return y+1 < BOARD ? (y+1)*BOARD+x : -1; }
-inline static int south_of(int x, int y) { return y-1 > 0 ? (y-1)*BOARD+x : -1; }
+inline static int south_of(int x, int y) { return (y-1) >= 0 ? (y-1)*BOARD+x : -1; }
 
-//TODO: zobrist hash the things.
 typedef struct GameBoard {
   uint64_t hash;
-  BoardState state;
   Chain allstones[BOARD*BOARD];
-  GameBoard(BoardState start) {
-    state = start;
+  GameBoard() {
+    hash = 0;
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
         allstones[TO_INDEX(j, i)].parent = -1;
@@ -89,19 +54,13 @@ typedef struct GameBoard {
     else return (allstones[pos].parent = Find(allstones[pos].parent));
   }
   void Remove(int pos) {
-    int p = Find(pos);
-    if (p != -1) allstones[p].parent = -1;
+    int p = Find(pos); if (p != -1) allstones[p].parent = -1; allstones[p].colour = EMPTY; allstones[pos].colour = EMPTY;
+    hash ^= zobrist[p][allstones[p].colour-1]; hash ^= zobrist[pos][allstones[pos].colour-1];
     // re-add liberty spots for contact chains.
-    for (std::set<int>::iterator i = allstones[pos].contacts.begin(); i!=allstones[pos].contacts.end(); ++i) {
-      allstones[*i].liberties.insert(pos);
-    }
+    for (std::set<int>::iterator i = allstones[pos].contacts.begin(); i!=allstones[pos].contacts.end(); ++i) { allstones[*i].liberties.insert(pos); hash ^= zobrist[*i][allstones[*i].colour-1]; }
   }
-  int Connected(int pos1, int pos2) {
-    int p = Find(pos1); return p == Find(pos2) && p != -1;
-  }
-  int Empty(int pos1) {
-    return Find(pos1) == -1;
-  }
+  int Connected(int pos1, int pos2) { int p = Find(pos1); return p == Find(pos2) && p != -1; }
+  int Empty(int pos1) { return Find(pos1) == -1; }
   int Union(int pos1, int pos2) {
     int p1 = Find(pos1), p2 = Find(pos2);
     if (p1 == p2) return p1;
@@ -116,7 +75,7 @@ typedef struct GameBoard {
   }
   int Add(int x, int y, int colour) {
     int pos = TO_INDEX(x,y);
-    if (allstones[pos].colour) { return 0; } // error, occupied cell
+    if (allstones[pos].colour != EMPTY) { return 0; } // error, occupied cell
     int east = east_of(x,y), west = west_of(x,y);
     int south = south_of(x,y), north = north_of(x,y);
     // Check the dirty marker & flood fill if necessary.
@@ -128,23 +87,21 @@ typedef struct GameBoard {
       if (south > 0 && allstones[south].colour) allstones[pos].liberties.insert(south);
       if (north > 0 && allstones[north].colour) allstones[pos].liberties.insert(north);
     }
+    // TODO: check suicide rules.
     // merge with chains on NSEW adjacencies
-    if (east > 0) {
-      if (allstones[east].colour == colour) { allstones[pos].liberties.erase(east); Union(pos, east); }
-      else if (allstones[east].colour == OTHER_COLOUR(colour)) { allstones[east].liberties.erase(pos); allstones[pos].liberties.insert(east); }
+#define CHECKED_UNION_ON(dir) \
+    if (dir >= 0) {           \
+      allstones[dir].liberties.erase(pos); \
+      if (allstones[dir].colour == colour) { allstones[pos].liberties.erase(dir); Union(pos, dir); } \
+      else if (allstones[dir].colour != EMPTY) { allstones[pos].contacts.insert(dir); if (allstones[dir].liberties.empty()) Remove(dir); } \
     }
-    if (west > 0) {
-      if (allstones[west].colour == colour) { allstones[pos].liberties.erase(west); Union(pos, west); }
-      else if (allstones[west].colour == OTHER_COLOUR(colour)) { allstones[west].liberties.erase(pos); allstones[pos].liberties.insert(west); }
-    }
-    if (south > 0) {
-      if (allstones[south].colour == colour) { allstones[pos].liberties.erase(south); Union(pos, south); }
-      else if (allstones[south].colour == OTHER_COLOUR(colour)) { allstones[south].liberties.erase(pos); allstones[pos].liberties.insert(south); }
-    }
-    if (north > 0) {
-      if (allstones[north].colour == colour) { allstones[pos].liberties.erase(north); Union(pos, north); }
-      else if (allstones[north].colour == OTHER_COLOUR(colour)) { allstones[north].liberties.erase(pos); allstones[pos].liberties.insert(north); }
-    }
+
+    CHECKED_UNION_ON(east);
+    CHECKED_UNION_ON(west);
+    CHECKED_UNION_ON(south);
+    CHECKED_UNION_ON(north);
+
+    allstones[pos].colour = colour;
     hash ^= zobrist[y*BOARD+x][colour-1]; //update hash
     return 1;
   }
@@ -164,71 +121,11 @@ void gen_zobrist() {
   }
 }
 
-// Flood fill to get liberty count.
-int liberties(int x, int y, BitBoard p1, BitBoard p2) {
-  BitBoard visited;
-  visited.clear();
-  int start_node = y*BOARD+x;
-  std::queue<int> nodes;
-  nodes.push(start_node);
-  int liberties = 0;
-  while(!nodes.empty()) {
-    int current = nodes.front();
-    nodes.pop();
-    int xx = current%BOARD, yy = current/BOARD;
-    if (!visited.testboard(xx, yy)) {
-      visited.setboard(xx, yy);
-      if (xx > 0) {
-        if (p1.testboard(xx-1, yy))
-          nodes.push(yy*BOARD + xx-1);
-        else if (!p2.testboard(xx-1, yy))
-          ++liberties;
-      }
-      if (yy > 0) {
-        if (p1.testboard(xx, yy-1))
-          nodes.push((yy-1)*BOARD+xx);
-        else if (!p2.testboard(xx, yy-1))
-          ++liberties;
-      }
-      if (xx < BOARD) {
-        if (p1.testboard(xx+1, yy))
-          nodes.push(yy*BOARD+xx+1);
-        else if (!p2.testboard(xx+1, yy))
-          ++liberties;
-      }
-      if (yy < BOARD) {
-        if (p1.testboard(xx, yy+1))
-          nodes.push((yy+1)*BOARD+xx);
-        else if (!p2.testboard(xx, yy+1))
-          ++liberties;
-      }
-    }
-  }
-  return liberties;
-}
-
-// clear dead stones from board.
-// TODO: cache already computed squares when we clear chains.
-void eval_board(GameBoard& b) {
-  for (int i = 0; i < BOARD; ++i) {
-    for (int j = 0; j < BOARD; ++j) {
-      if (!liberties(i, j, b.state.white, b.state.black)) {
-        b.state.white.clearboard(i, j);
-      } else if (!liberties(i, j, b.state.black, b.state.white)) {
-        b.state.black.clearboard(i, j);
-      }
-    }
-  }
-}
-
-void make_move(uint8_t p, GameBoard& gb, std::set<BoardState>& past) {
+void make_move(int p, GameBoard& gb, std::set<uint64_t>& past) {
   char x;
   unsigned int y;
-  BitBoard p1, p2;
-  p1 = p ? gb.state.white : gb.state.black;
-  p2 = p ? gb.state.black : gb.state.white;
   while (1) {
-    if (p) fputs("White to move: ", stdout);
+    if (p == WHITE) fputs("White to move: ", stdout);
     else fputs("Black to move: ", stdout);
     if (scanf("%c%u", &x, &y) != 2) continue;
     int xx = static_cast<int>(x-'A');
@@ -237,23 +134,16 @@ void make_move(uint8_t p, GameBoard& gb, std::set<BoardState>& past) {
       fprintf(stderr, "ILLEGAL MOVE: Invalid point\n");
       continue;
     }
-    if (p1.testboard(xx, yy) || p2.testboard(xx, yy) || !liberties(xx, yy, p1, p2)) {
-      fprintf(stderr, "ILLEGAL MOVE: Point %c%u is already occupied or has no liberties!\n", x, y);
-      continue;
-    }
-    GameBoard t(gb);
-    if (p) {
-      t.state.white.setboard(xx, yy);
-    } else {
-      t.state.black.setboard(xx, yy);
-    }
-    eval_board(t);
-    if (past.find(t.state) != past.end()) {
+    //GameBoard t(gb);
+    if (!gb.Add(xx, yy, p)) { fprintf(stderr, "ILLEGAL MOVE: some shit\n"); continue; }
+    /*
+    if (past.find(t.hash) != past.end()) {
       fprintf(stderr, "ILLEGAL MOVE: Repeated board state\n");
       continue;
     }
-    past.insert(t.state);
+    past.insert(t.hash);
     gb = t;
+    */
     return;
   }
 }
@@ -270,8 +160,9 @@ void ANSI_clear_screen(void) { printf("%c[2J", ESC); }
 #define EMPTY_AA  43
 #define WHITE_AA 103
 #define BLACK_AA  30
-void print_state(BoardState& b) {
+void print_state(GameBoard& b) {
   //*
+  int blacks = 0, whites = 0;
   ANSI_clear_screen();
   ANSI_cursor_move(5, 5);
   printf("   ABCDEFGHIKLMNOPQRST");
@@ -285,15 +176,13 @@ void print_state(BoardState& b) {
     printf("%2d ", BOARD-i);
     // */
     for (int j = 0; j < BOARD; ++j) {
-      int colour = b.white.testboard(j, BOARD-i-1) ? WHITE_AA :
-        b.black.testboard(j, BOARD-i-1) ? BLACK_AA : EMPTY_AA;
+      int colour = EMPTY_AA;
+      int pos = b.Find(TO_INDEX(j, BOARD-i-1));
+      colour = b.allstones[pos].colour == BLACK ? BLACK_AA : b.allstones[pos].colour == WHITE ? WHITE_AA : EMPTY_AA;
       if (colour != EMPTY_AA) {
-        /*
-        if (colour == BLACK) {
-          fprintf(stderr, "BLACK: %d %d\n", j, BOARD-i-1);
-        } else {
-          fprintf(stderr, "WHITE: %d %d\n", j, BOARD-i-1);
-        }
+        //*
+        if (colour == BLACK_AA) { blacks++; //fprintf(stderr, "BLACK: %d %d\n", j, BOARD-i-1);
+        } else { whites++; }//fprintf(stderr, "WHITE: %d %d\n", j, BOARD-i-1); }
         // */
       }
       //*
@@ -311,22 +200,21 @@ void print_state(BoardState& b) {
   ANSI_goto_column(5);
   printf("   ABCDEFGHIKLMNOPQRST");
   ANSI_cursor_down(1);
+  printf(" B: %d W: %d", blacks, whites);
+  ANSI_cursor_down(1);
   ANSI_goto_column(5);
   // */
 }
 
 int main(int argc, char** argv) {
-  BoardState start;
-  GameBoard b(start);
+  GameBoard b;
   gen_zobrist();
-  std::set<BoardState> past_states;
-  past_states.insert(start);
-  print_state(start);
+  std::set<uint64_t> past_states;
+  past_states.insert(0);
+  print_state(b);
   FOREVER {
-    make_move(1, b, past_states);
-    print_state(b.state);
-    make_move(0, b, past_states);
-    print_state(b.state);
+    make_move(WHITE, b, past_states); print_state(b);
+    make_move(BLACK, b, past_states); print_state(b);
   }
   return 0;
 }
