@@ -2,6 +2,7 @@
 #include<queue>
 #include<set>
 #include<utility>
+#include<cstdlib>
 #include<stdint.h>
 
 #define BOARD 19
@@ -10,6 +11,9 @@
 #define WHITE 2
 #define FOREVER for(;;)
 #define TO_INDEX(x,y) ((y)*BOARD+(x))
+#define OTHER_COLOUR(x) (x ? x == 1 ? 2 : 1 : 0)
+uint64_t zobrist[BOARD*BOARD][2];
+
 typedef struct BitBoard {
   uint64_t b[6];
   BitBoard() { this->clear(); }
@@ -40,7 +44,10 @@ typedef struct BitBoard {
 typedef struct Chain {
   int parent;
   int colour;
-  Chain() : rank(0), parent(-1) {}
+  int dirty; // mark when we place a stone here, we need to flood fill to reset the liberty count.
+  std::set<int> liberties; // empty adjacents
+  std::set<int> contacts; // adjacents of the opposite colour
+  Chain() : colour(EMPTY), parent(-1) {}
 } Chain;
 
 typedef struct BoardState {
@@ -54,60 +61,108 @@ typedef struct BoardState {
   bool operator<(const BoardState& p) const { return true; }
 } BoardState;
 
+inline static int east_of(int x, int y) { return x-1 >= 0 ? y*BOARD+x-1 : -1; }
+inline static int west_of(int x, int y) { return x+1 < BOARD ? y*BOARD+x+1 : -1; }
+inline static int north_of(int x, int y) { return y+1 < BOARD ? (y+1)*BOARD+x : -1; }
+inline static int south_of(int x, int y) { return y-1 > 0 ? (y-1)*BOARD+x : -1; }
+
+//TODO: zobrist hash the things.
 typedef struct GameBoard {
+  uint64_t hash;
   BoardState state;
-  std::set<Chain*> w_chains;
-  std::set<Chain*> b_chains;
   Chain allstones[BOARD*BOARD];
   GameBoard(BoardState start) {
     state = start;
-    for (int i = 0; i < BOARD*BOARD; ++i) {
-      allstones[i].parent = -1;
-      allstones[i].colour = EMPTY;
+    for (int i = 0; i < BOARD; ++i) {
+      for (int j = 0; j < BOARD; ++j) {
+        allstones[TO_INDEX(j, i)].parent = -1;
+        allstones[TO_INDEX(j, i)].colour = EMPTY;
+        if (east_of(j, i) > 0) allstones[TO_INDEX(j, i)].liberties.insert(east_of(j, i));
+        if (west_of(j, i) > 0) allstones[TO_INDEX(j, i)].liberties.insert(west_of(j, i));
+        if (south_of(j, i) > 0) allstones[TO_INDEX(j, i)].liberties.insert(south_of(j, i));
+        if (north_of(j, i) > 0) allstones[TO_INDEX(j, i)].liberties.insert(north_of(j, i));
+      }
     }
   }
   int Find(int pos) {
-    if allstones[pos].parent == pos || allstones[pos].parent == -1
-      return pos
-    else
-      return (allstones[pos].parent = Find(allstones[pos].parent));
+    if (allstones[pos].parent == pos || allstones[pos].parent == -1) return pos;
+    else return (allstones[pos].parent = Find(allstones[pos].parent));
   }
   void Remove(int pos) {
-    int p = Find(pos); if (p != -1) allstones[p].parent = -1;
+    int p = Find(pos);
+    if (p != -1) allstones[p].parent = -1;
+    // re-add liberty spots for contact chains.
+    for (std::set<int>::iterator i = allstones[pos].contacts.begin(); i!=allstones[pos].contacts.end(); ++i) {
+      allstones[*i].liberties.insert(pos);
+    }
   }
   int Connected(int pos1, int pos2) {
-    int p = Find(pos1);
-    return p == Find(pos2) && p != -1;
+    int p = Find(pos1); return p == Find(pos2) && p != -1;
   }
   int Empty(int pos1) {
     return Find(pos1) == -1;
   }
   int Union(int pos1, int pos2) {
-    int p1 = Find(pos1);
-    int p2 = Find(pos2);
+    int p1 = Find(pos1), p2 = Find(pos2);
     if (p1 == p2) return p1;
-    if (allstones[p1].parent < allstones[p2].parent) { allstones[p2].parent = p1; return p1; }
+    if (allstones[p1].parent < allstones[p2].parent) {
+      allstones[p2].parent = p1;
+      // collect liberties with set rep.
+      allstones[p1].liberties.insert(allstones[p2].liberties.begin(), allstones[p2].liberties.end());
+      allstones[p2].liberties.clear();
+      return p1;
+    }
     else { allstones[p1].parent = p2; return p2; }
   }
   int Add(int x, int y, int colour) {
-    if (allstones[pos1].colour) { return 0; } // error, occupied cell
-    // merge with chains on NSEW adjacencies
-    if (x > 0) {
-      int pos = TO_INDEX(x,y);
-      if (allstones[TO_INDEX(x-1,y)].colour == colour) {
-        Union(pos, TO_INDEX(x-1,y));
-      } (allstones[TO_INDEX(x-1,y)].colour != EMPTY) {
-
-      }
+    int pos = TO_INDEX(x,y);
+    if (allstones[pos].colour) { return 0; } // error, occupied cell
+    int east = east_of(x,y), west = west_of(x,y);
+    int south = south_of(x,y), north = north_of(x,y);
+    // Check the dirty marker & flood fill if necessary.
+    if (allstones[pos].dirty) {
+      allstones[pos].dirty = 0;
+      allstones[pos].liberties.clear();
+      if (east > 0 && allstones[east].colour) allstones[pos].liberties.insert(east);
+      if (west > 0 && allstones[west].colour) allstones[pos].liberties.insert(west);
+      if (south > 0 && allstones[south].colour) allstones[pos].liberties.insert(south);
+      if (north > 0 && allstones[north].colour) allstones[pos].liberties.insert(north);
     }
-    if (x < BOARD-1 && allstones[TO_INDEX(x+1,y)].colour == colour)
-      Union(TO_INDEX(x,y), TO_INDEX(x+1,y));
-    if (y > 0 && allstones[TO_INDEX(x,y-1)].colour == colour)
-      Union(TO_INDEX(x,y), TO_INDEX(x,y-1));
-    if (y < BOARD-1 && allstones[TO_INDEX(x,y+1)].colour == colour)
-      Union(TO_INDEX(x,y), TO_INDEX(x,y+1));
+    // merge with chains on NSEW adjacencies
+    if (east > 0) {
+      if (allstones[east].colour == colour) { allstones[pos].liberties.erase(east); Union(pos, east); }
+      else if (allstones[east].colour == OTHER_COLOUR(colour)) { allstones[east].liberties.erase(pos); allstones[pos].liberties.insert(east); }
+    }
+    if (west > 0) {
+      if (allstones[west].colour == colour) { allstones[pos].liberties.erase(west); Union(pos, west); }
+      else if (allstones[west].colour == OTHER_COLOUR(colour)) { allstones[west].liberties.erase(pos); allstones[pos].liberties.insert(west); }
+    }
+    if (south > 0) {
+      if (allstones[south].colour == colour) { allstones[pos].liberties.erase(south); Union(pos, south); }
+      else if (allstones[south].colour == OTHER_COLOUR(colour)) { allstones[south].liberties.erase(pos); allstones[pos].liberties.insert(south); }
+    }
+    if (north > 0) {
+      if (allstones[north].colour == colour) { allstones[pos].liberties.erase(north); Union(pos, north); }
+      else if (allstones[north].colour == OTHER_COLOUR(colour)) { allstones[north].liberties.erase(pos); allstones[pos].liberties.insert(north); }
+    }
+    hash ^= zobrist[y*BOARD+x][colour-1]; //update hash
+    return 1;
   }
 } GameBoard;
+
+uint64_t rand64() {
+  return static_cast<uint64_t>(rand()) ^ (static_cast<uint64_t>(rand()) << 15)
+                ^ (static_cast<uint64_t>(rand()) << 30)
+                ^ (static_cast<uint64_t>(rand()) << 45)
+                ^ (static_cast<uint64_t>(rand()) << 60);
+}
+
+void gen_zobrist() {
+  for (int i = 0; i < BOARD*BOARD; ++i) {
+    zobrist[i][0] = rand64();
+    zobrist[i][1] = rand64();
+  }
+}
 
 // Flood fill to get liberty count.
 int liberties(int x, int y, BitBoard p1, BitBoard p2) {
@@ -159,12 +214,8 @@ void eval_board(GameBoard& b) {
     for (int j = 0; j < BOARD; ++j) {
       if (!liberties(i, j, b.state.white, b.state.black)) {
         b.state.white.clearboard(i, j);
-        Chain* p = b.allstones[i][j].Find();
-        p->parent = &b.empty;
       } else if (!liberties(i, j, b.state.black, b.state.white)) {
         b.state.black.clearboard(i, j);
-        Chain* p = b.allstones[i][j].Find();
-        p->parent = &b.empty;
       }
     }
   }
@@ -267,6 +318,7 @@ void print_state(BoardState& b) {
 int main(int argc, char** argv) {
   BoardState start;
   GameBoard b(start);
+  gen_zobrist();
   std::set<BoardState> past_states;
   past_states.insert(start);
   print_state(start);
