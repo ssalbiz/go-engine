@@ -6,4 +6,4 @@ aigo: *.cc
 	$(CXX) $(CXXFLAGS) $^ -o aigo 
 
 clean:
-	rm -f *.o aigo *plist
+	rm -f *.o a.out aigo *plist
