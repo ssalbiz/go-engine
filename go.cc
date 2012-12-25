@@ -12,6 +12,15 @@
 #define FOREVER for(;;)
 #define TO_INDEX(x,y) ((y)*BOARD+(x))
 #define ESC 27
+
+typedef enum MoveStatus {
+  OK,
+  OCCUPIED,
+  SUICIDE,
+  SUPERKO
+} MoveStatus;
+
+
 void ANSI_cursor_move(int r, int c) { printf("%c[%d;%dH", ESC, r, c); }
 uint64_t zobrist[BOARD*BOARD][2];
 
@@ -40,8 +49,10 @@ inline static int south_ofp(int x) { return (x/BOARD)-1 >= 0 ? x-BOARD : -1; }
 typedef struct GameBoard {
   uint64_t hash;
   Chain allstones[BOARD*BOARD];
+  std::set<uint64_t> past_states;
   GameBoard() {
     hash = 0;
+    past_states.insert(hash);
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
         allstones[TO_INDEX(j, i)].parent = TO_INDEX(j, i);
@@ -69,6 +80,7 @@ typedef struct GameBoard {
 
     FLOOD_FILL(east_ofp(pos)); FLOOD_FILL(west_ofp(pos));
     FLOOD_FILL(south_ofp(pos)); FLOOD_FILL(north_ofp(pos));
+    hash ^= zobrist[pos][colour-1];
   }
   int Connected(int pos1, int pos2) { return Find(pos1) == Find(pos2); }
   int Empty(int pos) { return allstones[Find(pos)].colour == EMPTY; }
@@ -86,9 +98,9 @@ typedef struct GameBoard {
     }
   }
   int Union(int pos1, int pos2) { return UnionAdd(Find(pos1), pos2); }
-  int Add(int x, int y, int colour) {
+  MoveStatus Add(int x, int y, int colour) {
     int pos = TO_INDEX(x,y);
-    if (allstones[pos].colour != EMPTY) { return 0; } // error, occupied cell
+    if (allstones[pos].colour != EMPTY) { return OCCUPIED; } // error, occupied cell
     int east = east_of(x,y), west = west_of(x,y);
     int south = south_of(x,y), north = north_of(x,y);
     // check for suicides.
@@ -97,15 +109,20 @@ typedef struct GameBoard {
     if (dir >= 0) { \
       int dir_rep = Find(dir); \
       if (allstones[dir_rep].colour == colour) { \
-        if (allstones[dir_rep].liberties == 1) { return 0; } else {save = 1;} \
-      } \
+        if (allstones[dir_rep].liberties > 1) { save = 1; } \
+      } else if (allstones[dir_rep].liberties == 1) { save = 1; } \
     }
 
     if (!allstones[pos].liberties) {
       CHECKED_LIBERTY_ON(east); CHECKED_LIBERTY_ON(west);
       CHECKED_LIBERTY_ON(south); CHECKED_LIBERTY_ON(north);
-      if (!save) return 0;
+      if (!save) return SUICIDE;
     }
+
+    // Update hash and check for superko.
+    uint64_t new_hash = hash ^ zobrist[TO_INDEX(x,y)][colour-1];
+    if (past_states.find(new_hash) != past_states.end()) return SUPERKO;
+    else hash = new_hash;
 
     // merge with chains on NSEW adjacencies
 #define CHECKED_UNION_ON(dir) \
@@ -119,8 +136,7 @@ typedef struct GameBoard {
     CHECKED_UNION_ON(south); CHECKED_UNION_ON(north);
 
     allstones[pos].colour = colour;
-    //hash ^= zobrist[y*BOARD+x][colour-1]; //update hash
-    return 1;
+    return OK;
   }
 } GameBoard;
 
@@ -138,7 +154,7 @@ void gen_zobrist() {
   }
 }
 
-void make_move(int p, GameBoard& gb, std::set<uint64_t>& past) {
+void make_move(int p, GameBoard& gb) {
   char x;
   unsigned int y;
   while (1) {
@@ -151,17 +167,13 @@ void make_move(int p, GameBoard& gb, std::set<uint64_t>& past) {
       fprintf(stderr, "ILLEGAL MOVE: Invalid point\n");
       continue;
     }
-    //GameBoard t(gb);
-    if (!gb.Add(xx, yy, p)) { fprintf(stderr, "ILLEGAL MOVE: some shit\n"); continue; }
-    /*
-    if (past.find(t.hash) != past.end()) {
-      fprintf(stderr, "ILLEGAL MOVE: Repeated board state\n");
-      continue;
+    int ret = gb.Add(xx, yy, p);
+    switch (ret) {
+      case 0: return;
+      case 1: fprintf(stderr, "ILLEGAL MOVE: OCCUPIED SQUARE\n"); break;
+      case 2: fprintf(stderr, "ILLEGAL MOVE: SUICIDE SQUARE\n"); break;
+      case 3: fprintf(stderr, "ILLEGAL MOVE: SUPERKO VIOLATION\n"); break;
     }
-    past.insert(t.hash);
-    gb = t;
-    */
-    return;
   }
 }
 
@@ -218,12 +230,10 @@ void print_state(GameBoard& b) {
 int main(int argc, char** argv) {
   GameBoard b;
   gen_zobrist();
-  std::set<uint64_t> past_states;
-  past_states.insert(0);
   print_state(b);
   FOREVER {
-    make_move(WHITE, b, past_states); print_state(b);
-    make_move(BLACK, b, past_states); print_state(b);
+    make_move(WHITE, b); print_state(b);
+    make_move(BLACK, b); print_state(b);
   }
   return 0;
 }
