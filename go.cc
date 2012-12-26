@@ -1,9 +1,7 @@
-#include<cstdio>
-#include<queue>
-#include<set>
-#include<utility>
-#include<cstdlib>
 #include<stdint.h>
+#include<cstdio>
+#include<cstdlib>
+#include<set>
 
 #define BOARD 19
 #define EMPTY 0
@@ -17,7 +15,8 @@ typedef enum MoveStatus {
   OK,
   OCCUPIED,
   SUICIDE,
-  SUPERKO
+  SUPERKO,
+  INVALID_PT,
 } MoveStatus;
 
 
@@ -121,8 +120,8 @@ typedef struct GameBoard {
 
     // Update hash and check for superko.
     uint64_t new_hash = hash ^ zobrist[TO_INDEX(x,y)][colour-1];
-    if (past_states.find(new_hash) != past_states.end()) return SUPERKO;
-    else hash = new_hash;
+    if (past_states.find(new_hash) != past_states.end()) { return SUPERKO; }
+    else { hash = new_hash; past_states.insert(hash); }
 
     // merge with chains on NSEW adjacencies
 #define CHECKED_UNION_ON(dir) \
@@ -158,21 +157,42 @@ void make_move(int p, GameBoard& gb) {
   char x;
   unsigned int y;
   while (1) {
+#ifdef DEBUG
     if (p == WHITE) fputs("White to move: ", stdout);
     else fputs("Black to move: ", stdout);
+#endif
     if (scanf("%c%u", &x, &y) != 2) continue;
     int xx = static_cast<int>(x-'A');
     int yy = static_cast<int>(y)-1;
     if (xx < 0 || xx > 18 || yy < 0 || yy > 18) {
+#ifdef DEBUG
       fprintf(stderr, "ILLEGAL MOVE: Invalid point\n");
+#else
+      fprintf(stdout, "%d", INVALID_PT);
+#endif
       continue;
     }
     int ret = gb.Add(xx, yy, p);
     switch (ret) {
       case 0: return;
-      case 1: fprintf(stderr, "ILLEGAL MOVE: OCCUPIED SQUARE\n"); break;
-      case 2: fprintf(stderr, "ILLEGAL MOVE: SUICIDE SQUARE\n"); break;
-      case 3: fprintf(stderr, "ILLEGAL MOVE: SUPERKO VIOLATION\n"); break;
+      case 1:
+#ifdef DEBUG
+              fprintf(stderr, "ILLEGAL MOVE: OCCUPIED SQUARE\n"); break;
+#else
+              fprintf(stderr, "%d", OCCUPIED); break;
+#endif
+      case 2:
+#ifdef DEBUG
+              fprintf(stderr, "ILLEGAL MOVE: SUICIDE SQUARE\n"); break;
+#else
+              fprintf(stderr, "%d", SUICIDE); break;
+#endif
+      case 3:
+#ifdef DEBUG
+              fprintf(stderr, "ILLEGAL MOVE: SUPERKO VIOLATION\n"); break;
+#else
+              fprintf(stderr, "%d", SUPERKO); break;
+#endif
     }
   }
 }
@@ -188,6 +208,7 @@ void ANSI_clear_screen(void) { printf("%c[2J", ESC); }
 #define WHITE_AA 107
 #define BLACK_AA  40
 void print_state(GameBoard& b) {
+#ifdef DEBUG
   //*
   int blacks = 0, whites = 0;
   ANSI_clear_screen();
@@ -221,10 +242,11 @@ void print_state(GameBoard& b) {
   ANSI_goto_column(5);
   printf("   ABCDEFGHIKLMNOPQRST");
   ANSI_cursor_down(1);
-  printf(" B: %d W: %d", blacks, whites);
+  printf(" B: %d W: %d HASH: %lu", blacks, whites, b.hash);
   ANSI_cursor_down(1);
   ANSI_goto_column(5);
   // */
+#endif
 }
 
 int main(int argc, char** argv) {
