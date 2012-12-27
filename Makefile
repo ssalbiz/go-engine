@@ -1,16 +1,16 @@
 CXX = clang++
 CXXFLAGS = -I. -O2
 ANALYZE = --analyze
-.PHONY: clean analyze
 
-aigo: *.cc
-	$(CXX) $(CXXFLAGS) $^ -o aigo 
+.PHONY: clean analyze all
 
-debug: *.cc
-	$(CXX) $(CXXFLAGS) -DDEBUG $^ -o debug 
+all: ansi gtp
+
+ansi: ansi.cc go.h
+	$(CXX) $(CXXFLAGS) ansi.cc -o ansi 
 
 clean:
-	rm -f *.o a.out aigo *plist debug
+	rm -f *.o a.out gtp ansi *plist debug
 
-analyze: *.cc
-	$(CXX) $(CXXFLAGS) $(ANALYZE) $^ -o aigo 
+gtp: gtp.cc go.h
+	$(CXX) $(CXXFLAGS) gtp.cc -o gtp
