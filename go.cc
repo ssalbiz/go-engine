@@ -2,6 +2,7 @@
 #include<cstdio>
 #include<cstdlib>
 #include<set>
+#include<utility>
 
 #define BOARD 19
 #define EMPTY 0
@@ -17,6 +18,9 @@ typedef enum MoveStatus {
   SUICIDE,
   SUPERKO,
   INVALID_PT,
+  GAME_OVER,
+  RESIGN,
+  DISPUTE
 } MoveStatus;
 
 
@@ -46,11 +50,13 @@ inline static int north_ofp(int x) { return (x/BOARD)+1 < BOARD ? x+BOARD : -1; 
 inline static int south_ofp(int x) { return (x/BOARD)-1 >= 0 ? x-BOARD : -1; }
 
 typedef struct GameBoard {
+  int passes;
   uint64_t hash;
   Chain allstones[BOARD*BOARD];
   std::set<uint64_t> past_states;
   GameBoard() {
     hash = 0;
+    passes = 0;
     past_states.insert(hash);
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
@@ -153,7 +159,7 @@ void gen_zobrist() {
   }
 }
 
-void make_move(int p, GameBoard& gb) {
+int make_move(int p, GameBoard& gb) {
   char x;
   unsigned int y;
   while (1) {
@@ -162,9 +168,15 @@ void make_move(int p, GameBoard& gb) {
     else fputs("Black to move: ", stdout);
 #endif
     if (scanf("%c%u", &x, &y) != 2) continue;
+    // allow a pass.
+    if (x == '-') {if (gb.passes >= 2) {return GAME_OVER;} else {return OK; }}
+    else gb.passes = 0;
+    // allow a resignation.
+    if (x == 'r') return RESIGN;
+
     int xx = static_cast<int>(x-'A');
     int yy = static_cast<int>(y)-1;
-    if (xx < 0 || xx > 18 || yy < 0 || yy > 18) {
+    if (xx < 0 || xx > BOARD || yy < 0 || yy > BOARD) {
 #ifdef DEBUG
       fprintf(stderr, "ILLEGAL MOVE: Invalid point\n");
 #else
@@ -174,24 +186,13 @@ void make_move(int p, GameBoard& gb) {
     }
     int ret = gb.Add(xx, yy, p);
     switch (ret) {
-      case 0: return;
-      case 1:
+      case OK: return OK;
 #ifdef DEBUG
-              fprintf(stderr, "ILLEGAL MOVE: OCCUPIED SQUARE\n"); break;
+      case OCCUPIED: fprintf(stderr, "ILLEGAL MOVE: OCCUPIED SQUARE\n"); break;
+      case SUICIDE: fprintf(stderr, "ILLEGAL MOVE: SUICIDE SQUARE\n"); break;
+      case SUPERKO: fprintf(stderr, "ILLEGAL MOVE: SUPERKO VIOLATION\n"); break;
 #else
-              fprintf(stderr, "%d", OCCUPIED); break;
-#endif
-      case 2:
-#ifdef DEBUG
-              fprintf(stderr, "ILLEGAL MOVE: SUICIDE SQUARE\n"); break;
-#else
-              fprintf(stderr, "%d", SUICIDE); break;
-#endif
-      case 3:
-#ifdef DEBUG
-              fprintf(stderr, "ILLEGAL MOVE: SUPERKO VIOLATION\n"); break;
-#else
-              fprintf(stderr, "%d", SUPERKO); break;
+      default: fprintf(stderr, "%d", ret); break;
 #endif
     }
   }
@@ -209,16 +210,13 @@ void ANSI_clear_screen(void) { printf("%c[2J", ESC); }
 #define BLACK_AA  40
 void print_state(GameBoard& b) {
 #ifdef DEBUG
-  //*
   int blacks = 0, whites = 0;
   ANSI_clear_screen();
   ANSI_cursor_move(5, 5);
   printf("   ABCDEFGHIKLMNOPQRST");
   ANSI_double_thick();
   ANSI_cursor_down(1);
-  // */
   for (int i = 0; i < BOARD; ++i) {
-    //*
     ANSI_goto_column(5);
     ANSI_double_thick();
     printf("%2d ", BOARD-i);
@@ -227,8 +225,7 @@ void print_state(GameBoard& b) {
       int pos = b.Find(TO_INDEX(j, BOARD-i-1));
       colour = b.allstones[pos].colour == BLACK ? BLACK_AA : b.allstones[pos].colour == WHITE ? WHITE_AA : EMPTY_AA;
       if (colour != EMPTY_AA) {
-        if (colour == BLACK_AA) { blacks++; //fprintf(stderr, "BLACK: %d %d\n", j, BOARD-i-1);
-        } else { whites++; }//fprintf(stderr, "WHITE: %d %d\n", j, BOARD-i-1); }
+        if (colour == BLACK_AA) { blacks++; } else { whites++; }
       }
       ANSI_set_colour(colour);
       printf(" ");
@@ -236,17 +233,62 @@ void print_state(GameBoard& b) {
     }
     printf(" %2d ", BOARD-i);
     ANSI_cursor_down(1);
-    // */
   }
-  //*
   ANSI_goto_column(5);
   printf("   ABCDEFGHIKLMNOPQRST");
   ANSI_cursor_down(1);
   printf(" B: %d W: %d HASH: %lu", blacks, whites, b.hash);
   ANSI_cursor_down(1);
   ANSI_goto_column(5);
-  // */
 #endif
+}
+
+std::pair<int, int> score(GameBoard& b) {
+  std::pair<int, int> scores(0, 0);
+  return scores;
+}
+
+void print_result(std::pair<int, int>& p) {
+#ifdef DEBUG
+  fprintf(stderr, "GAME OVER: WHITE: %d, BLACK: %d\n", p.first, p.second);
+#else
+  fprintf(stdout, "%d %d %d", GAME_OVER, p.first, p.second);
+#endif
+}
+
+static inline void dispute_msg() {
+#ifdef DEBUG
+  fprintf(stderr, "DISPUTE: resume play.\n");
+#else
+  fprintf(stdout, "%d", DISPUTE);
+#endif
+}
+
+// Agree on dead stones.
+void end_game(GameBoard& b) {
+#ifdef DEBUG
+  fprintf(stderr, "Select stones to remove");
+#endif
+  int x = -1, y = -1;
+  std::set<int> stones;
+  while(1) if (scanf("%d %d", &x, &y) != 1) continue; else if (x >= 0) stones.insert(TO_INDEX(x,y)); else break;
+  while(1) {
+    if (scanf("%d %d", &x, &y) != 1) { continue; }
+    else if (x >= 0) {
+      if (stones.find(TO_INDEX(x,y)) == stones.end()) {
+        dispute_msg(); return;
+      }
+      stones.erase(TO_INDEX(x,y));
+    }
+  }
+  if (!stones.empty()) { dispute_msg(); return; }
+  // Kill relevant stones.
+  for (std::set<int>::iterator i = stones.begin(); i != stones.end(); ++i) {
+    b.Remove(*i);
+  }
+  std::pair<int, int> scores = score(b);
+  print_result(scores);
+  exit( 0 ); // we're done here.
 }
 
 int main(int argc, char** argv) {
@@ -254,8 +296,10 @@ int main(int argc, char** argv) {
   gen_zobrist();
   print_state(b);
   FOREVER {
-    make_move(WHITE, b); print_state(b);
-    make_move(BLACK, b); print_state(b);
+    if (make_move(WHITE, b) == GAME_OVER) end_game(b);
+    print_state(b);
+    if (make_move(BLACK, b) == GAME_OVER) end_game(b);
+    print_state(b);
   }
   return 0;
 }
