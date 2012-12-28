@@ -42,7 +42,7 @@ void boardsize(char* s, int id, GameBoard& b) {
   if (sscanf(s, "%d", i) == 1 && i == BOARD) response(SUCCESS, id, "%s", "");
   else response(ERROR, id, "%s", "unacceptable size");
 }
-void clear_board(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
+void clear_board(char *s, int id, GameBoard& b) { b.clear(); response(SUCCESS, id, ""); }
 void komi(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
 void play(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
 void genmove(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }

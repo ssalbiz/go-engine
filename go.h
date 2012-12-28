@@ -68,11 +68,10 @@ typedef struct GameBoard {
       zobrist[i][1] = rand64();
     }
   }
-  GameBoard() {
+  void clear() {
     hash = 0;
     passes = 0;
     past_states.insert(hash);
-    gen_zobrist(); // generate zobrist hash seeds.
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
         allstones[TO_INDEX(j, i)].parent = TO_INDEX(j, i);
@@ -84,6 +83,10 @@ typedef struct GameBoard {
         if (north_of(j, i) >= 0) allstones[TO_INDEX(j, i)].liberties++;
       }
     }
+  }
+  GameBoard() {
+    gen_zobrist(); // generate zobrist hash seeds.
+    clear();
   }
   int Find(int pos) {
     if (allstones[pos].parent == pos) return pos;
