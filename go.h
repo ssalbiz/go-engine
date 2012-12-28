@@ -35,7 +35,7 @@ typedef struct Chain {
   int liberties; // empty adjacents
   int rank;
   uint64_t hash;
-  Chain() : colour(EMPTY), parent(-1), liberties(0), counter(0), hash(0) {}
+  Chain() : colour(EMPTY), parent(-1), liberties(0), rank(0), hash(0) {}
 } Chain;
 
 inline static int east_of(int x, int y) { return (x-1) >= 0 ? y*BOARD+x-1 : -1; }
@@ -56,6 +56,7 @@ static uint64_t rand64() {
 }
 
 typedef struct GameBoard {
+  int komi;
   int passes;
   uint64_t hash;
   Chain allstones[BOARD*BOARD];
@@ -71,6 +72,7 @@ typedef struct GameBoard {
   void clear() {
     hash = 0;
     passes = 0;
+    komi = 0;
     past_states.insert(hash);
     for (int i = 0; i < BOARD; ++i) {
       for (int j = 0; j < BOARD; ++j) {
@@ -88,6 +90,7 @@ typedef struct GameBoard {
     gen_zobrist(); // generate zobrist hash seeds.
     clear();
   }
+  void set_komi(int i) { komi = i; }
   int Find(int pos) {
     if (allstones[pos].parent == pos) return pos;
     else if (allstones[pos].rank > allstones[allstones[pos].parent].rank) {

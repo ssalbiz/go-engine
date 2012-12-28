@@ -39,19 +39,34 @@ void quit(char* s, int id, GameBoard& b) { response(SUCCESS, id, "%s", ""); fflu
 // board mutators. TODO: fill in stubs.
 void boardsize(char* s, int id, GameBoard& b) {
   int i = BOARD; // we only support the precompiled board size because lazy.
-  if (sscanf(s, "%d", i) == 1 && i == BOARD) response(SUCCESS, id, "%s", "");
+  if (sscanf(s, "%d", &i) == 1 && i == BOARD) response(SUCCESS, id, "%s", "");
   else response(ERROR, id, "%s", "unacceptable size");
 }
 void clear_board(char *s, int id, GameBoard& b) { b.clear(); response(SUCCESS, id, ""); }
-void komi(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
-void play(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
+void komi(char *s, int id, GameBoard& b) {
+  int i = 0;
+  if (sscanf(s, "%d", &i) == 1) { b.set_komi(i); response(SUCCESS, id, ""); }
+  else { response(ERROR, id, "invalid komi"); }
+}
+void play(char *s, int id, GameBoard& b) {
+  char colour[128];
+  char x; int y, ret = INVALID_PT;
+  if (sscanf(s, "%s %c%u", colour, &x, &y) != 3) { response(ERROR, id, "Invalid input"); return; }
+  if (strcasecmp(colour, "white") == 0 || strcasecmp(colour, "w"))
+    ret = b.Add(X_OFFSET(x), Y_OFFSET(y), WHITE);
+  if (strcasecmp(colour, "black") == 0 || strcasecmp(colour, "b"))
+    ret = b.Add(X_OFFSET(x), Y_OFFSET(y), BLACK);
+  if (ret == OK) response(SUCCESS, id, "");
+  else response(ERROR, id, "illegal move");
+}
+// needed for bots.
 void genmove(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
 void final_status_list(char *s, int id, GameBoard& b) { response(SUCCESS, id, "pass"); }
 
 static command commands[] = {
   { "protocol_version", &protocol_version },
   { "name", &name },
-  { "name", &version },
+  { "version", &version },
   { "known_command", &known_command },
   { "list_commands", &list_commands },
   { "quit", &quit },
