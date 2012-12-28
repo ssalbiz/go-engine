@@ -33,7 +33,9 @@ typedef struct Chain {
   int parent;
   int colour;
   int liberties; // empty adjacents
-  Chain() : colour(EMPTY), parent(-1), liberties(0) {}
+  int rank;
+  uint64_t hash;
+  Chain() : colour(EMPTY), parent(-1), liberties(0), counter(0), hash(0) {}
 } Chain;
 
 inline static int east_of(int x, int y) { return (x-1) >= 0 ? y*BOARD+x-1 : -1; }
@@ -52,7 +54,6 @@ static uint64_t rand64() {
                 ^ (static_cast<uint64_t>(rand()) << 45)
                 ^ (static_cast<uint64_t>(rand()) << 60);
 }
-
 
 typedef struct GameBoard {
   int passes;
@@ -86,31 +87,30 @@ typedef struct GameBoard {
   }
   int Find(int pos) {
     if (allstones[pos].parent == pos) return pos;
-    else return (allstones[pos].parent = Find(allstones[pos].parent));
+    else if (allstones[pos].rank > allstones[allstones[pos].parent].rank) {
+      allstones[pos].rank = 0; allstones[pos].colour = EMPTY; return (allstones[pos].parent = pos);
+    } else return (allstones[pos].parent = Find(allstones[pos].parent));
   }
-  void Remove(int pos) { // flood fill to remove.
-    int colour = allstones[pos].colour;
-    allstones[pos].colour = EMPTY; allstones[pos].parent = pos;
-#define FLOOD_FILL(dir) \
-    if (dir >= 0) { \
-      allstones[dir].liberties++; \
-      if (allstones[dir].colour == colour) { Remove(dir); allstones[pos].liberties++; } \
-    }
-
-    FLOOD_FILL(east_ofp(pos)); FLOOD_FILL(west_ofp(pos));
-    FLOOD_FILL(south_ofp(pos)); FLOOD_FILL(north_ofp(pos));
-    hash ^= zobrist[pos][colour-1];
+  void Remove(int pos) { // reset rank, all children will disengage on next find.
+    allstones[pos].colour = EMPTY;
+    allstones[pos].parent = pos;
+    allstones[pos].rank = 0;
+    hash ^= allstones[pos].hash;
+    allstones[pos].hash = 0;
   }
   int Connected(int pos1, int pos2) { return Find(pos1) == Find(pos2); }
   int Empty(int pos) { return allstones[Find(pos)].colour == EMPTY; }
   int UnionAdd(int pos1, int pos2) {
     int p1 = pos1, p2 = Find(pos2);
     if (p1 == p2) return p1;
-    if (p1 < p2) {
+    if (allstones[p1].rank >= allstones[p2].rank) {
+      allstones[p1].rank++;
       allstones[p1].liberties += allstones[p2].liberties;
       allstones[p2].liberties = 0;
+      allstones[p1].hash ^= allstones[p2].hash; allstones[p2].hash = 0;
       allstones[p2].parent = p1; return p1;
     } else {
+      allstones[p2].rank++;
       allstones[p2].liberties += allstones[p1].liberties;
       allstones[p1].liberties = 0;
       allstones[p1].parent = p2; return p2;
@@ -139,17 +139,18 @@ typedef struct GameBoard {
       if (!save) return SUICIDE;
     }
 
-    // Update hash and check for superko.
-    uint64_t new_hash = hash ^ zobrist[TO_INDEX(x,y)][colour-1];
+    // Update hash and check for superko. TODO: eval board, THEN superko? not sure what is actually right.
+    uint64_t new_hash = hash ^ zobrist[pos][colour-1];
     if (past_states.find(new_hash) != past_states.end()) { return SUPERKO; }
-    else { hash = new_hash; past_states.insert(hash); }
+    else { hash = new_hash; allstones[pos].hash ^= zobrist[pos][colour-1]; past_states.insert(hash); }
 
     // merge with chains on NSEW adjacencies
 #define CHECKED_UNION_ON(dir) \
     if (dir >= 0) {           \
-      allstones[Find(dir)].liberties--; \
-      if (allstones[dir].colour == colour) { UnionAdd(pos, dir); } \
-      else if (allstones[dir].colour != EMPTY) { if (!allstones[Find(dir)].liberties) Remove(dir); } \
+      int dir_rep = Find(dir); \
+      allstones[dir_rep].liberties--; \
+      if (allstones[dir_rep].colour == colour) { UnionAdd(pos, dir_rep); } \
+      else if (allstones[dir].colour != EMPTY) { if (!allstones[dir_rep].liberties) Remove(dir); } \
     }
 
     CHECKED_UNION_ON(east); CHECKED_UNION_ON(west);
