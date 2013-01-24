@@ -1,5 +1,9 @@
-protocol for talking to engine:
-  -- making moves: upcase letter A-T followed by number 1-19 eg 'A19'
-  -- to resign: downcase letter 'r' followed by 0
-  -- to pass: letter '-', followed by 0
-  -- After double pass, send list of positions to remove (removing one position removes entire strictly connected chain)
+Simple Go engine.
+
+Talks GTP.
+
+go.h contains the interesting go engine-y bits.
+ansi.cc contains output routines that draw an ascii art picture of the game
+state.
+
+very much a WIP.
