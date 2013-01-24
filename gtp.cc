@@ -60,6 +60,7 @@ void play(char *s, int id, GameBoard& b) {
   else response(ERROR, id, "illegal move");
 }
 // needed for bots.
+// TODO: actually fill in.
 void genmove(char *s, int id, GameBoard& b) { response(SUCCESS, id, ""); }
 void final_status_list(char *s, int id, GameBoard& b) { response(SUCCESS, id, "pass"); }
 

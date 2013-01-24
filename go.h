@@ -94,8 +94,11 @@ typedef struct GameBoard {
   int Find(int pos) {
     if (allstones[pos].parent == pos) return pos;
     else if (allstones[pos].rank > allstones[allstones[pos].parent].rank) {
-      allstones[pos].rank = 0; allstones[pos].colour = EMPTY; return (allstones[pos].parent = pos);
-    } else return (allstones[pos].parent = Find(allstones[pos].parent));
+      allstones[pos].rank = 0; allstones[pos].colour = EMPTY;
+      return (allstones[pos].parent = pos);
+    } else {
+      return (allstones[pos].parent = Find(allstones[pos].parent));
+    }
   }
   void Remove(int pos) { // reset rank, all children will disengage on next find.
     allstones[pos].colour = EMPTY;
