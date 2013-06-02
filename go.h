@@ -38,11 +38,13 @@ typedef struct Chain {
   Chain() : colour(EMPTY), parent(-1), liberties(0), rank(0), hash(0) {}
 } Chain;
 
+// adjacency getters for x-y coord
 inline static int east_of(int x, int y) { return (x-1) >= 0 ? y*BOARD+x-1 : -1; }
 inline static int west_of(int x, int y) { return x+1 < BOARD ? y*BOARD+x+1 : -1; }
 inline static int north_of(int x, int y) { return y+1 < BOARD ? (y+1)*BOARD+x : -1; }
 inline static int south_of(int x, int y) { return (y-1) >= 0 ? (y-1)*BOARD+x : -1; }
 
+// adjacency getters for single-dimensional offset
 inline static int east_ofp(int x) { return (x%BOARD)-1 >= 0 ? x-1 : -1; }
 inline static int west_ofp(int x) { return (x%BOARD)+1 < BOARD ? x+1 : -1; }
 inline static int north_ofp(int x) { return (x/BOARD)+1 < BOARD ? x+BOARD : -1; }
@@ -56,7 +58,7 @@ static uint64_t rand64() {
 }
 
 typedef struct GameBoard {
-  int komi;
+  int komi; // handicap to add to white's score.
   int passes;
   uint64_t hash;
   Chain allstones[BOARD*BOARD];
@@ -117,13 +119,34 @@ typedef struct GameBoard {
       allstones[p1].liberties += allstones[p2].liberties;
       allstones[p2].liberties = 0;
       allstones[p1].hash ^= allstones[p2].hash; allstones[p2].hash = 0;
-      allstones[p2].parent = p1; return p1;
+      allstones[p2].parent = p1;
+      return p1;
     } else {
       allstones[p2].rank++;
       allstones[p2].liberties += allstones[p1].liberties;
       allstones[p1].liberties = 0;
-      allstones[p1].parent = p2; return p2;
+      allstones[p2].hash ^= allstones[p1].hash; allstones[p1].hash = 0;
+      allstones[p1].parent = p2;
+      return p2;
     }
+  }
+  int HashUpdate(int pos, int colour) {
+    uint64_t new_hash = hash;
+#define HASH_UNION_ON(dir) \
+    if (dir >= 0) {        \
+      int dir_rep = Find(dir); \
+      if (allstones[dir_rep].colour == colour) { new_hash ^= allstones[dir_rep].hash; } \
+      else if (allstones[dir_rep].colour != EMPTY && allstones[dir_rep].liberties == 1) { \
+        new_hash ^= allstones[dir_rep].hash; \
+      } \
+    }
+    int east = east_ofp(pos), west = west_ofp(pos);
+    int north = north_ofp(pos), south = south_ofp(pos);
+    HASH_UNION_ON(east); HASH_UNION_ON(west);
+    HASH_UNION_ON(north); HASH_UNION_ON(south);
+    if (past_states.find(new_hash) != past_states.end()) { return SUPERKO; }
+    else { hash = new_hash; past_states.insert(hash); }
+    return OK;
   }
   int Union(int pos1, int pos2) { return UnionAdd(Find(pos1), pos2); }
   MoveStatus Add(int x, int y, int colour) {
@@ -148,10 +171,8 @@ typedef struct GameBoard {
       if (!save) return SUICIDE;
     }
 
-    // Update hash and check for superko. TODO: eval board, THEN superko? not sure what is actually right.
-    uint64_t new_hash = hash ^ zobrist[pos][colour-1];
-    if (past_states.find(new_hash) != past_states.end()) { return SUPERKO; }
-    else { hash = new_hash; allstones[pos].hash ^= zobrist[pos][colour-1]; past_states.insert(hash); }
+    // Update board hash and check for superko.
+    if (HashUpdate(pos, colour) == SUPERKO) return SUPERKO;
 
     // merge with chains on NSEW adjacencies
 #define CHECKED_UNION_ON(dir) \
@@ -159,9 +180,10 @@ typedef struct GameBoard {
       int dir_rep = Find(dir); \
       allstones[dir_rep].liberties--; \
       if (allstones[dir_rep].colour == colour) { UnionAdd(pos, dir_rep); } \
-      else if (allstones[dir].colour != EMPTY) { if (!allstones[dir_rep].liberties) Remove(dir); } \
+      else if (allstones[dir_rep].colour != EMPTY) { if (!allstones[dir_rep].liberties) Remove(dir); } \
     }
 
+    allstones[pos].hash ^= zobrist[pos][colour-1];
     CHECKED_UNION_ON(east); CHECKED_UNION_ON(west);
     CHECKED_UNION_ON(south); CHECKED_UNION_ON(north);
 
